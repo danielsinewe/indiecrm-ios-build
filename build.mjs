@@ -40,7 +40,9 @@ try {
   run('generate-project','xcodegen',['generate']);
   signing=signingSetup({request,root,env,run,output});
   if(signing)distribution=signing.proof;
-  const devices=spawnSync('xcrun',['simctl','list','devices','available','--json'],{env,encoding:'utf8',timeout:30_000});
+  const devices=spawnSync('xcrun',['simctl','list','devices','available','--json'],{env,encoding:'utf8',timeout:120_000});
+  fs.writeSync(log, 'Simulator discovery status: '+JSON.stringify({status:devices.status,error:devices.error?.code})+'\n'+(devices.stderr??'')+'\n');
+  if(devices.error||devices.status!==0)throw Error('Simulator discovery unavailable');
   const available=Object.values(JSON.parse(devices.stdout).devices).flat().filter(d=>d.isAvailable&&/iPhone/.test(d.name));
   const simulator=available.find(d=>/Pro Max/.test(d.name))??available[0];
   if(!simulator)throw Error('No iPhone simulator available');
@@ -54,7 +56,8 @@ try {
   fs.cpSync(path.join(source,'ios/build/IndieCRM.xcarchive'),path.join(output,'IndieCRM.xcarchive'),{recursive:true});
   if(signing)distribution=signing.finish(path.join(source,'ios/build/IndieCRM.xcarchive'));
   passed=true;
-} catch {
+} catch (error) {
+  fs.writeSync(log,String(error?.stack??'Native build failed')+'\n');
   console.error('Native verification failed. Diagnostics remain encrypted.');
   process.exitCode=1;
 } finally {
