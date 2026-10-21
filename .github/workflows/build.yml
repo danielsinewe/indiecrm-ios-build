@@ -1,0 +1,89 @@
+name: Private iPhone validation
+on:
+  workflow_dispatch:
+    inputs:
+      payload_tag:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: indiecrm-iphone
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'danielsinewe/indiecrm-ios-build' && github.actor == 'danielsinewe' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      PAYLOAD_TAG: ${{ inputs.payload_tag }}
+      EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      PRIVATE_BUILD_ROOT: ${{ runner.temp }}/indiecrm-private
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+      - run: node --test envelope.test.mjs
+      - name: Authenticate and decrypt source
+        id: decrypt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IC_INPUT_KEY: ${{ secrets.IC_INPUT_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PAYLOAD_TAG" =~ ^ios-[0-9a-f]{12}-[0-9a-f]{12}$ ]]
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          mkdir "$PRIVATE_BUILD_ROOT"
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          fs.writeFileSync(process.env.PRIVATE_BUILD_ROOT+'/input-context.json',JSON.stringify({sourceSha:process.env.EXPECTED_SOURCE_SHA,kind:'indiecrm-ios-input'}));
+          JS
+          gh release download "$PAYLOAD_TAG" --repo "$GITHUB_REPOSITORY" --pattern input.icenc --dir "$PRIVATE_BUILD_ROOT"
+          node envelope.mjs open-input "$PRIVATE_BUILD_ROOT/input.icenc" "$PRIVATE_BUILD_ROOT/input.tar.gz" "$PRIVATE_BUILD_ROOT/input-context.json"
+          python3 - <<'PY'
+          import os,tarfile,pathlib
+          root=pathlib.Path(os.environ['PRIVATE_BUILD_ROOT'])
+          with tarfile.open(root/'input.tar.gz') as archive:
+              for m in archive.getmembers():
+                  p=pathlib.PurePosixPath(m.name)
+                  assert not p.is_absolute() and '..' not in p.parts and not m.issym() and not m.islnk() and (m.isfile() or m.isdir())
+                  assert m.name.startswith('source/ios/') or m.name in ['source','source/ios','request.json','recipient-public.pem']
+              archive.extractall(root,filter='data')
+          PY
+      - name: Test and archive private source
+        id: native
+        continue-on-error: true
+        run: node build.mjs
+      - name: Encrypt private diagnostics and archive
+        if: always() && steps.decrypt.outcome == 'success'
+        run: |
+          set -euo pipefail
+          tar -czf "$PRIVATE_BUILD_ROOT/output.tar.gz" -C "$PRIVATE_BUILD_ROOT/output" .
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs';
+          fs.writeFileSync(process.env.PRIVATE_BUILD_ROOT+'/output-context.json',JSON.stringify({sourceSha:process.env.EXPECTED_SOURCE_SHA,kind:'indiecrm-ios-output'}));
+          JS
+          node envelope.mjs seal-output "$PRIVATE_BUILD_ROOT/output.tar.gz" "$PRIVATE_BUILD_ROOT/result.icenc" "$PRIVATE_BUILD_ROOT/output-context.json" "$PRIVATE_BUILD_ROOT/recipient-public.pem"
+      - name: Save encrypted result
+        if: always() && steps.decrypt.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$PAYLOAD_TAG" "$PRIVATE_BUILD_ROOT/result.icenc" --repo "$GITHUB_REPOSITORY"
+      - name: Report native validation result
+        if: always()
+        env:
+          RESULT: ${{ steps.native.outcome }}
+        run: test "$RESULT" = success
+      - name: Remove disposable plaintext
+        if: always()
+        run: rm -rf "$PRIVATE_BUILD_ROOT"
