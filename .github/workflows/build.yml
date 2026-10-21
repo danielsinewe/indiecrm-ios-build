@@ -73,12 +73,12 @@ jobs:
           import fs from 'node:fs';
           fs.writeFileSync(process.env.PRIVATE_BUILD_ROOT+'/output-context.json',JSON.stringify({sourceSha:process.env.EXPECTED_SOURCE_SHA,kind:'indiecrm-ios-output'}));
           JS
-          node envelope.mjs seal-output "$PRIVATE_BUILD_ROOT/output.tar.gz" "$PRIVATE_BUILD_ROOT/result.icenc" "$PRIVATE_BUILD_ROOT/output-context.json" "$PRIVATE_BUILD_ROOT/recipient-public.pem"
+          node envelope.mjs seal-output "$PRIVATE_BUILD_ROOT/output.tar.gz" "$PRIVATE_BUILD_ROOT/result-$GITHUB_RUN_ID.icenc" "$PRIVATE_BUILD_ROOT/output-context.json" "$PRIVATE_BUILD_ROOT/recipient-public.pem"
       - name: Save encrypted result
         if: always() && steps.decrypt.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$PAYLOAD_TAG" "$PRIVATE_BUILD_ROOT/result.icenc" --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$PAYLOAD_TAG" "$PRIVATE_BUILD_ROOT/result-$GITHUB_RUN_ID.icenc" --repo "$GITHUB_REPOSITORY"
       - name: Report native validation result
         if: always()
         env:

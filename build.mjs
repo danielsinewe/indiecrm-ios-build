@@ -11,8 +11,10 @@ const source = path.join(root, 'source');
 const output = path.join(root, 'output');
 fs.mkdirSync(output, { recursive: true, mode: 0o700 });
 const log = fs.openSync(path.join(output, 'build.log'), 'a', 0o600);
-const env = Object.fromEntries(['PATH','HOME','TMPDIR','LANG','DEVELOPER_DIR'].flatMap(k => process.env[k] ? [[k,process.env[k]]] : []));
+const env = Object.fromEntries(['PATH','HOME','USER','LOGNAME','TMPDIR','LANG','DEVELOPER_DIR'].flatMap(k => process.env[k] ? [[k,process.env[k]]] : []));
 env.CI = 'true';
+env.HOMEBREW_NO_AUTO_UPDATE = '1';
+env.HOMEBREW_NO_INSTALL_CLEANUP = '1';
 const steps = [];
 function run(phase, command, args, timeout = 20 * 60_000) {
   const result = spawnSync(command,args,{cwd:path.join(source,'ios'),env,stdio:['ignore',log,log],timeout});
