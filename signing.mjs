@@ -12,6 +12,12 @@ export function validateSigning(value) {
   return value;
 }
 
+export function archiveSigningArguments(identity,name,build) {
+  // The app target expands this custom setting. Dependency bundles never
+  // receive an application provisioning profile.
+  return ['CURRENT_PROJECT_VERSION='+build,'DEVELOPMENT_TEAM=UWPUJ24CNA','INDIECRM_PROFILE_SPECIFIER='+name,'CODE_SIGN_STYLE=Manual','CODE_SIGN_IDENTITY='+identity,'CODE_SIGNING_ALLOWED=YES'];
+}
+
 export function signingSetup({request,root,env,run,output}) {
   const data=validateSigning(request.signing);
   if(!data)return null;
@@ -28,6 +34,7 @@ p=plistlib.loads(pathlib.Path(sys.argv[1]).read_bytes())
 assert p['TeamIdentifier']==['UWPUJ24CNA']
 assert p['Entitlements']['application-identifier']=='UWPUJ24CNA.app.indiecrm.ios'
 assert p['Entitlements'].get('get-task-allow') is False
+assert p['Entitlements'].get('com.apple.developer.associated-domains')
 assert not p.get('ProvisionedDevices') and not p.get('ProvisionsAllDevices')
 assert p['ExpirationDate']>datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 certs=[c for c in p['DeveloperCertificates'] if hashlib.sha256(c).hexdigest()==sys.argv[2]]
@@ -51,7 +58,7 @@ print(json.dumps({'uuid':p['UUID'],'name':p['Name'],'identity':hashlib.sha1(cert
   const proof={signed:false,uploaded:false,build:data.build,certificateSha256:data.certificateSha256,profileId:metadata.uuid};
   return {
     proof,
-    archiveArgs:['CURRENT_PROJECT_VERSION='+data.build,'DEVELOPMENT_TEAM=UWPUJ24CNA','PROVISIONING_PROFILE_SPECIFIER='+metadata.name,'CODE_SIGN_STYLE=Manual','CODE_SIGN_IDENTITY='+metadata.identity,'CODE_SIGNING_ALLOWED=YES'],
+    archiveArgs:archiveSigningArguments(metadata.identity,metadata.name,data.build),
     finish(archive) {
       run('verify-device-signature','codesign',['--verify','--deep','--strict',path.join(archive,'Products/Applications/IndieCRM.app')]);
       const exportPath=path.join(directory,'export');
