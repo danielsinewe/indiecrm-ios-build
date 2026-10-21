@@ -20,6 +20,7 @@ const steps = [];
 function run(phase, command, args, timeout = 20 * 60_000) {
   const result = spawnSync(command,args,{cwd:path.join(source,'ios'),env,stdio:['ignore',log,log],timeout});
   steps.push({phase,passed:!result.error && result.status===0,exitCode:result.status});
+  fs.writeSync(log,JSON.stringify({phase,status:result.status,signal:result.signal,errorCode:result.error?.code})+'\n');
   if (!steps.at(-1).passed) throw Error('Private build failed');
   console.log('Completed '+phase);
   return result;
@@ -47,12 +48,13 @@ try {
   const simulator=available.find(d=>/Pro Max/.test(d.name))??available[0];
   if(!simulator)throw Error('No iPhone simulator available');
   run('native-tests','xcodebuild',['test','-project','IndieCRM.xcodeproj','-scheme','IndieCRM','-destination','platform=iOS Simulator,id='+simulator.udid,'-derivedDataPath','build/DerivedData','-resultBundlePath','build/Tests.xcresult','CODE_SIGN_IDENTITY=-','CODE_SIGNING_ALLOWED=YES','-parallel-testing-enabled','NO']);
-  run('device-archive','xcodebuild',['archive','-project','IndieCRM.xcodeproj','-scheme','IndieCRM','-configuration','Release','-destination','generic/platform=iOS','-archivePath','build/IndieCRM.xcarchive',...(signing?.archiveArgs??['CODE_SIGNING_ALLOWED=NO'])]);
   const summary=spawnSync('xcrun',['xcresulttool','get','test-results','summary','--path',path.join(source,'ios/build/Tests.xcresult')],{env,encoding:'utf8',timeout:60_000});
   if(summary.status!==0)throw Error('Test summary unavailable');
   fs.writeFileSync(path.join(output,'tests.json'),summary.stdout);
   const tests=JSON.parse(summary.stdout);
   if(tests.failedTests!==0||tests.passedTests<14)throw Error('Native tests incomplete');
+  signing?.beforeArchive();
+  run('device-archive','xcodebuild',['archive','-project','IndieCRM.xcodeproj','-scheme','IndieCRM','-configuration','Release','-destination','generic/platform=iOS','-archivePath','build/IndieCRM.xcarchive',...(signing?.archiveArgs??['CODE_SIGNING_ALLOWED=NO'])]);
   fs.cpSync(path.join(source,'ios/build/IndieCRM.xcarchive'),path.join(output,'IndieCRM.xcarchive'),{recursive:true});
   if(signing)distribution=signing.finish(path.join(source,'ios/build/IndieCRM.xcarchive'));
   passed=true;

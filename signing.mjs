@@ -12,10 +12,10 @@ export function validateSigning(value) {
   return value;
 }
 
-export function archiveSigningArguments(identity,name,build) {
+export function archiveSigningArguments(identity,name,build,keychain) {
   // The app target expands this custom setting. Dependency bundles never
   // receive an application provisioning profile.
-  return ['CURRENT_PROJECT_VERSION='+build,'DEVELOPMENT_TEAM=UWPUJ24CNA','INDIECRM_PROFILE_SPECIFIER='+name,'CODE_SIGN_STYLE=Manual','CODE_SIGN_IDENTITY='+identity,'CODE_SIGNING_ALLOWED=YES'];
+  return ['CURRENT_PROJECT_VERSION='+build,'DEVELOPMENT_TEAM=UWPUJ24CNA','INDIECRM_PROFILE_SPECIFIER='+name,'CODE_SIGN_STYLE=Manual','CODE_SIGN_IDENTITY='+identity,'CODE_SIGNING_ALLOWED=YES',...(keychain?['OTHER_CODE_SIGN_FLAGS=--keychain '+keychain]:[])];
 }
 
 export function signingSetup({request,root,env,run,output}) {
@@ -47,9 +47,10 @@ print(json.dumps({'uuid':p['UUID'],'name':p['Name'],'identity':hashlib.sha1(cert
   const profiles=path.join(env.HOME,'Library/MobileDevice/Provisioning Profiles');fs.mkdirSync(profiles,{recursive:true});
   const installed=path.join(profiles,metadata.uuid+'.mobileprovision');fs.copyFileSync(profile,installed,fs.constants.COPYFILE_EXCL);
   run('create-signing-keychain','security',['create-keychain','-p',data.password,keychain]);
+  run('keep-signing-keychain-unlocked','security',['set-keychain-settings','-lut','21600',keychain]);
   run('unlock-signing-keychain','security',['unlock-keychain','-p',data.password,keychain]);
   run('import-signing-identity','security',['import',p12,'-P',data.password,'-k',keychain,'-t','cert','-f','pkcs12','-A']);
-  run('configure-signing-keychain','security',['set-key-partition-list','-S','apple-tool:,apple:','-k',data.password,keychain]);
+  run('configure-signing-keychain','security',['set-key-partition-list','-S','apple-tool:,apple:,codesign:','-k',data.password,keychain]);
   run('select-signing-keychain','security',['list-keychains','-d','user','-s',keychain,path.join(env.HOME,'Library/Keychains/login.keychain-db')]);
   const options={method:'app-store-connect',destination:'export',teamID:'UWPUJ24CNA',signingStyle:'manual',signingCertificate:metadata.identity,provisioningProfiles:{'app.indiecrm.ios':metadata.uuid},manageAppVersionAndBuildNumber:false,uploadSymbols:true};
   fs.writeFileSync(path.join(directory,'export.json'),JSON.stringify(options));
@@ -58,7 +59,10 @@ print(json.dumps({'uuid':p['UUID'],'name':p['Name'],'identity':hashlib.sha1(cert
   const proof={signed:false,uploaded:false,build:data.build,certificateSha256:data.certificateSha256,profileId:metadata.uuid};
   return {
     proof,
-    archiveArgs:archiveSigningArguments(metadata.identity,metadata.name,data.build),
+    archiveArgs:archiveSigningArguments(metadata.identity,metadata.name,data.build,keychain),
+    beforeArchive() {
+      run('unlock-signing-before-archive','security',['unlock-keychain','-p',data.password,keychain]);
+    },
     finish(archive) {
       run('verify-device-signature','codesign',['--verify','--deep','--strict',path.join(archive,'Products/Applications/IndieCRM.app')]);
       const exportPath=path.join(directory,'export');
